@@ -1,3 +1,24 @@
+/*
+ * Multi-Architecture Farrar
+ * Copyright (C) 2026 Gustavo Santana Lima
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
+
+
 #ifndef AVX_OPS_HPP
 #define AVX_OPS_HPP
 
@@ -13,41 +34,41 @@ public:
     using VecType = __m256i;
     using ElemType = int16_t;
 
-    static ALWAYS_INLINE void setVL(size_t)
+    ALWAYS_INLINE void setVL(size_t)
     {
     }
 
-    static ALWAYS_INLINE VecType add(VecType a, VecType b)
+    ALWAYS_INLINE VecType add(VecType a, VecType b)
     {
         return _mm256_add_epi16(a, b);
     }
 
-    static ALWAYS_INLINE VecType add(VecType a, ElemType value)
+    ALWAYS_INLINE VecType add(VecType a, ElemType value)
     {
         return _mm256_add_epi16(a, _mm256_set1_epi16(value));
     }
 
-    static ALWAYS_INLINE VecType sub(VecType a, VecType b)
+    ALWAYS_INLINE VecType sub(VecType a, VecType b)
     {
         return _mm256_sub_epi16(a, b);
     }
 
-    static ALWAYS_INLINE VecType sub(VecType a, ElemType value)
+    ALWAYS_INLINE VecType sub(VecType a, ElemType value)
     {
         return _mm256_sub_epi16(a, _mm256_set1_epi16(value));
     }
 
-    static ALWAYS_INLINE VecType max(VecType a, VecType b)
+    ALWAYS_INLINE VecType max(VecType a, VecType b)
     {
         return _mm256_max_epi16(a, b);
     }
 
-    static ALWAYS_INLINE VecType max(VecType a, ElemType value)
+    ALWAYS_INLINE VecType max(VecType a, ElemType value)
     {
         return _mm256_max_epi16(a, _mm256_set1_epi16(value));
     }
 
-    static ALWAYS_INLINE ElemType maxValue(VecType a)
+    ALWAYS_INLINE ElemType maxValue(VecType a)
     {
         __m128i low  = _mm256_castsi256_si128(a);
         __m128i high = _mm256_extracti128_si256(a, 1);
@@ -61,14 +82,14 @@ public:
         return static_cast<ElemType>(_mm_extract_epi16(v, 0));
     }
 
-    static ALWAYS_INLINE bool anyBiggerElement(VecType a, VecType b)
+    ALWAYS_INLINE bool anyBiggerElement(VecType a, VecType b)
     {
         VecType cmp = _mm256_cmpgt_epi16(a, b);
 
         return !_mm256_testz_si256(cmp, cmp);
     }
 
-    static ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
+    ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
     {
         __m128i low  = _mm256_castsi256_si128(a);
         __m128i high = _mm256_extracti128_si256(a, 1);
@@ -87,7 +108,7 @@ public:
 
     //Auxiliar Function
     template <int Offset>
-    static ALWAYS_INLINE VecType slideupImpl(VecType a)
+    ALWAYS_INLINE VecType slideupImpl(VecType a)
     {
         static_assert(Offset >= 0 && Offset <= 16);
 
@@ -136,7 +157,7 @@ public:
         return _mm256_set_m128i(resultHigh, resultLow);
     }
 
-    static ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
+    ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
     {
         switch (offset)
         {
@@ -164,7 +185,7 @@ public:
         }
     }
 
-    static ALWAYS_INLINE ElemType lastElement(VecType a)
+    ALWAYS_INLINE ElemType lastElement(VecType a)
     {
         return static_cast<ElemType>(
             _mm256_extract_epi16(a, 15)
@@ -177,41 +198,41 @@ public:
     using VecType  = __m256i;
     using ElemType = int32_t;
 
-    static ALWAYS_INLINE void setVL(size_t)
+    ALWAYS_INLINE void setVL(size_t)
     {
     }
 
-    static ALWAYS_INLINE VecType add(VecType a, VecType b)
+    ALWAYS_INLINE VecType add(VecType a, VecType b)
     {
         return _mm256_add_epi32(a, b);
     }
 
-    static ALWAYS_INLINE VecType add(VecType a, ElemType value)
+    ALWAYS_INLINE VecType add(VecType a, ElemType value)
     {
         return _mm256_add_epi32(a, _mm256_set1_epi32(value));
     }
 
-    static ALWAYS_INLINE VecType sub(VecType a, VecType b)
+    ALWAYS_INLINE VecType sub(VecType a, VecType b)
     {
         return _mm256_sub_epi32(a, b);
     }
 
-    static ALWAYS_INLINE VecType sub(VecType a, ElemType value)
+    ALWAYS_INLINE VecType sub(VecType a, ElemType value)
     {
         return _mm256_sub_epi32(a, _mm256_set1_epi32(value));
     }
 
-    static ALWAYS_INLINE VecType max(VecType a, VecType b)
+    ALWAYS_INLINE VecType max(VecType a, VecType b)
     {
         return _mm256_max_epi32(a, b);
     }
 
-    static ALWAYS_INLINE VecType max(VecType a, ElemType value)
+    ALWAYS_INLINE VecType max(VecType a, ElemType value)
     {
         return _mm256_max_epi32(a, _mm256_set1_epi32(value));
     }
 
-    static ALWAYS_INLINE ElemType maxValue(VecType a)
+    ALWAYS_INLINE ElemType maxValue(VecType a)
     {
         __m128i low  = _mm256_castsi256_si128(a);
         __m128i high = _mm256_extracti128_si256(a, 1);
@@ -224,14 +245,14 @@ public:
         return _mm_cvtsi128_si32(v);
     }
 
-    static ALWAYS_INLINE bool anyBiggerElement(VecType a, VecType b)
+    ALWAYS_INLINE bool anyBiggerElement(VecType a, VecType b)
     {
         VecType cmp = _mm256_cmpgt_epi32(a, b);
 
         return !_mm256_testz_si256(cmp, cmp);
     }
 
-    static ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
+    ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
     {
         __m128i low  = _mm256_castsi256_si128(a);
         __m128i high = _mm256_extracti128_si256(a, 1);
@@ -250,7 +271,7 @@ public:
 
     //Auxiliar Function
     template <int Offset>
-    static ALWAYS_INLINE VecType slideupImpl(VecType a)
+    ALWAYS_INLINE VecType slideupImpl(VecType a)
     {
         static_assert(Offset >= 0 && Offset <= 8);
 
@@ -288,7 +309,7 @@ public:
         return _mm256_set_m128i(resultHigh, resultLow);
     }
 
-    static ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
+    ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
     {
         switch (offset)
         {
@@ -313,7 +334,7 @@ public:
         }
     }
 
-    static ALWAYS_INLINE ElemType lastElement(VecType a)
+    ALWAYS_INLINE ElemType lastElement(VecType a)
     {
         return _mm256_extract_epi32(a, 7);
     }

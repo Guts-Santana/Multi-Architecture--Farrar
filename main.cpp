@@ -1,91 +1,49 @@
+/*
+ * Multi-Architecture Farrar
+ * Copyright (C) 2026 Gustavo Santana Lima
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 
 #include "execution.hpp"
+#include "CLIParameters.hpp"
 
 namespace fs = std::filesystem;
 
 int main(int argc, char* argv[])
 {
-    // Expected:
-    // ./farrar_benchmark seq1.fasta seq2.fasta ftype vectype
+    try {
+        CLIParametersOptions options = parseArguments(argc, argv);
 
-    if (argc != 5)
-    {
-        std::cerr
-            << "Usage: " << argv[0]
-            << " <fasta_file1> <fasta_file2> <ftype> <vectype>\n";
-
-        return 1;
+        executeBenchmark(
+            options.seq0,
+            options.seq1,
+            options.fStrategy,
+            options.vector
+        );
     }
 
-    const std::string seq0File = argv[1];
-    const std::string seq1File = argv[2];
-    const std::string ftype    = argv[3];
-    const std::string vectype  = argv[4];
-
-    const std::string seq0 = readFasta(seq0File);
-    const std::string seq1 = readFasta(seq1File);
-
-    fs::path folderPath = "work";
-
-    if (!fs::exists(folderPath))
-        fs::create_directories(folderPath);
-
-    // Extract only the FASTA filenames
-    const std::string seq0Name =
-        fs::path(seq0File).stem().string();
-
-    const std::string seq1Name =
-        fs::path(seq1File).stem().string();
-
-    const std::string fileName = "Comparison_" + 
-        seq0Name + "_" +
-        seq1Name + "_" +
-        ftype + "_" +
-        vectype + ".txt";
-
-    const fs::path outputPath = folderPath / fileName;
-
-    std::ofstream outFile(outputPath);
-
-    if (!outFile.is_open())
+    catch (const std::exception& e)
     {
-        std::cerr
-            << "Error: Could not open output file at "
-            << outputPath << '\n';
-
+        std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
-
-    std::cout
-        << "Loaded Sequences:\n"
-        << " - Seq 0 Length: " << seq0.length() << " bp\n"
-        << " - Seq 1 Length: " << seq1.length() << " bp\n"
-        << " - Strategy Type: " << ftype << "\n"
-        << " - Vector Type: " << vectype << "\n\n";
-
-    outFile
-        << "Loaded Sequences:\n"
-        << " - Seq 0 Length: " << seq0.length() << " bp\n"
-        << " - Seq 1 Length: " << seq1.length() << " bp\n"
-        << " - Strategy Type: " << ftype << "\n"
-        << " - Vector Type: " << vectype << "\n\n";
-
-    runBenchmark<AvxInt16>(
-        seq0,
-        seq1,
-        ftype,
-        outFile
-    );
-
-    outFile.close();
-
-    std::cout
-        << "Benchmark complete. Results saved to "
-        << outputPath << '\n';
 
     return 0;
 }

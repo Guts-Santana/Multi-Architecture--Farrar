@@ -1,3 +1,22 @@
+/*
+ * Multi-Architecture Farrar
+ * Copyright (C) 2026 Gustavo Santana Lima
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #include "Farrar.hpp"
 
 template <typename Backend>
@@ -11,16 +30,14 @@ void Farrar<Backend>::setSequences(std::string s0, std::string s1)
 template <typename Backend>
 int Farrar<Backend>::obtainScore()
 {
-
-    Ops::setVL(VL);
     initMatrices();
     buildProfile();
     VecType vMaxBlock = Traits::set(0, VL);
     for (int i = 0; i < s1.length(); i++)
     {
-        vMaxBlock = Ops::max(vMaxBlock, processColumn(i));
+        vMaxBlock = ops.max(vMaxBlock, processColumn(i));
     }
-    maxScore = static_cast<int>(Ops::maxValue(vMaxBlock));
+    maxScore = static_cast<int>(ops.maxValue(vMaxBlock));
     return maxScore;
 }
 
@@ -94,7 +111,7 @@ void Farrar<Backend>::processPrimaryPass(int column, VecType &vF, VecType &vMax)
     VecType vE;
     VecType vProfileTemp;
     VecType vH = pvHStore[segLen - 1].load();
-    vH = Ops::shift(vH, 0);
+    vH = ops.shift(vH, 0);
 
     std::swap(pvHStore, pvHLoad);
 
@@ -105,31 +122,31 @@ void Farrar<Backend>::processPrimaryPass(int column, VecType &vF, VecType &vMax)
     {
         if (profileIndex == -1)
         {
-            vH = Ops::add(vH, mismatch);
+            vH = ops.add(vH, mismatch);
         }
         else
         {
             vProfileTemp = vProfile[baseIndex + j].load();
-            vH = Ops::add(vH, vProfileTemp);
+            vH = ops.add(vH, vProfileTemp);
         }
 
         vE = pvE[j].load();
 
-        vH = Ops::max(vH, vE);
-        vH = Ops::max(vH, vF);
-        vH = Ops::max(vH, 0);
+        vH = ops.max(vH, vE);
+        vH = ops.max(vH, vF);
+        vH = ops.max(vH, 0);
 
-        vMax = Ops::max(vMax, vH);
+        vMax = ops.max(vMax, vH);
 
         pvHStore[j].store(vH);
 
-        vH = Ops::add(vH, gap_open);
-        vE = Ops::add(vE, gap_ext);
-        vE = Ops::max(vE, vH);
+        vH = ops.add(vH, gap_open);
+        vE = ops.add(vE, gap_ext);
+        vE = ops.max(vE, vH);
         pvE[j].store(vE);
 
-        vF = Ops::add(vF, gap_ext);
-        vF = Ops::max(vF, vH);
+        vF = ops.add(vF, gap_ext);
+        vF = ops.max(vF, vH);
         vH = pvHLoad[j].load();
     }
 }
@@ -138,50 +155,50 @@ template <typename Backend>
 void Farrar<Backend>::propagatePrefixScanF(VecType &vF, VecType &vMax)
 {
     int accumulatedDecay;
-    vF = Ops::shift(vF, 0);
+    vF = ops.shift(vF, 0);
     VecType vH, vShift;
 
     for (size_t offset = 1; offset < VL; offset <<= 1)
     {
-        vShift = Ops::slideup(vF, offset);
+        vShift = ops.slideup(vF, offset);
 
         accumulatedDecay = offset * gap_ext;
-        vShift = Ops::add(vShift, accumulatedDecay);
+        vShift = ops.add(vShift, accumulatedDecay);
 
-        vF = Ops::max(vF, vShift);
+        vF = ops.max(vF, vShift);
     }
 
     for (size_t j = 0; j < segLen; j++)
     {
         vH = pvHStore[j].load();
-        vH = Ops::max(vH, vF);
+        vH = ops.max(vH, vF);
         pvHStore[j].store(vH);
-        vMax = Ops::max(vMax, vH);
-        vF = Ops::add(vF, gap_ext);
+        vMax = ops.max(vMax, vH);
+        vF = ops.add(vF, gap_ext);
     }
 }
 
 template <typename Backend>
 void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax)
 {
-    vF = Ops::shift(vF, 0);
+    vF = ops.shift(vF, 0);
     size_t j = 0;
     VecType vHStore = pvHStore[j].load();
     int vFCarry;
-    while (Ops::anyBiggerElement(vF, Ops::add(vHStore, gap_open)))
+    while (ops.anyBiggerElement(vF, ops.add(vHStore, gap_open)))
     {
         vHStore = pvHStore[j].load();
-        vHStore = Ops::max(vHStore, vF);
+        vHStore = ops.max(vHStore, vF);
         pvHStore[j].store(vHStore);
-        vMax = Ops::max(vMax, vHStore);
+        vMax = ops.max(vMax, vHStore);
 
         j++;
-        vF = Ops::add(vF, gap_ext);
+        vF = ops.add(vF, gap_ext);
 
         if (j >= segLen)
         {
-            vFCarry = Ops::lastElement(vF);
-            vF = Ops::shift(vF, vFCarry);
+            vFCarry = ops.lastElement(vF);
+            vF = ops.shift(vF, vFCarry);
             j = 0;
         }
     }
@@ -216,5 +233,23 @@ void Farrar<Backend>::clearData()
 // template class Farrar<vint32m4_t>;
 // template class Farrar<vint32m8_t>;
 
+#if defined(USE_RVV)
+
+template class Farrar<RvvInt16M1>;
+template class Farrar<RvvInt16M2>;
+template class Farrar<RvvInt16M4>;
+template class Farrar<RvvInt16M8>;
+
+template class Farrar<RvvInt32M1>;
+template class Farrar<RvvInt32M2>;
+template class Farrar<RvvInt32M4>;
+template class Farrar<RvvInt32M8>;
+
+#endif
+
+#if defined(USE_AVX)
+
 template class Farrar<AvxInt16>;
 template class Farrar<AvxInt32>;
+
+#endif

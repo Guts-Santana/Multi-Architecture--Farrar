@@ -1,3 +1,22 @@
+/*
+ * Multi-Architecture Farrar
+ * Copyright (C) 2026 Gustavo Santana Lima
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+
 #ifndef FARRAR_HPP
 #define FARRAR_HPP
 
@@ -19,6 +38,10 @@ protected:
     using Ops        = typename Backend::Ops;
     using Traits     = typename Backend::Traits;
     using BufferType = Buffer<Backend>;
+
+
+    private:
+        Ops ops;
 
     int gap_open = GAP_OPEN;
     int gap_ext = GAP_EXT;
@@ -55,6 +78,7 @@ protected:
     Farrar(std::string s0, std::string s1, std::string ftype) : maxScore(0), s0(s0), s1(s1), ftype(ftype)
     {
         VL = Traits::maxVL();
+        ops.setVL(VL);
         segLen = (s0.length() + VL - 1) / VL;
 
         if (ftype == "prefix-scan-f" || ftype == "prefix")

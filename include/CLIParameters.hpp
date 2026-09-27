@@ -16,30 +16,28 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef CONSTANTS_HPP
-#define CONSTANTS_HPP
+#ifndef CLIPARAMETERS_HPP
+#define CLIPARAMETERS_HPP
 
-#include <array>
 #include <string>
-#include <limits>
-#include <cstdint>
-
-#include <chrono>
-#include <filesystem>
-#include <fstream>
+#include <getopt.h>
+#include <cstdlib>
 #include <iostream>
-#include <vector>
-#include <sys/resource.h>
+#include <stdexcept>
 
-constexpr int MATCH = 1;
-constexpr int MISMATCH = -3;
-constexpr int GAP = -2;
-constexpr int GAP_OPEN = -5;
-constexpr int GAP_EXT = -2;
-
-constexpr int16_t MINUS_INF = std::numeric_limits<int16_t>::min();
-
-namespace fs = std::filesystem;
+#include "config.h"
 
 
-#endif // CONSTANTS_HPP
+struct CLIParametersOptions {
+    std::string vector;
+    std::string fStrategy;
+    std::string seq0;
+    std::string seq1;
+
+};
+
+CLIParametersOptions parseArguments(int argc, char* argv[]);
+
+void printHelp(const char* program);
+
+#endif
