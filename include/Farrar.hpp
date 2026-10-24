@@ -33,6 +33,11 @@
 #include "Buffer.hpp"
 #include "Backend.hpp"
 
+#ifdef FARRAR_WITH_MASA
+// cell_t / score_t / INF used by the MASA block interface (alignBlock)
+#include "libmasa/libmasaTypes.hpp"
+#endif
+
 
 /*
  * Scores are added to the DP cells, so penalties are negative.
@@ -78,7 +83,30 @@ protected:
     // One row of segLen vectors per residue, plus a last row (all mismatch)
     // used for characters outside the alphabet.
     BufferType vProfile;
+    // True F of every cell of the current column (only filled by alignBlock)
+    BufferType pvF;
     std::vector<int> s1Index;
+
+#ifdef FARRAR_WITH_MASA
+    // Set while alignBlock runs: F and E leave the block through MASA's
+    // boundaries, so the F correction must also keep pvF and E up to date
+    bool blockMode = false;
+#else
+    // Standalone builds never align blocks: the MASA-only steps compile away
+    static constexpr bool blockMode = false;
+#endif
+
+    // "Minus infinity" that still leaves headroom for the non-saturating adds
+    static constexpr ElemType LOW = std::numeric_limits<ElemType>::min() / 4;
+
+#ifdef FARRAR_WITH_MASA
+    // MASA boundaries are int and may contain -INF (-999999999): clamp into lane range
+    static ElemType toLane(int v)
+    {
+        constexpr int HIGH = std::numeric_limits<ElemType>::max();
+        return static_cast<ElemType>(v < LOW ? LOW : (v > HIGH ? HIGH : v));
+    }
+#endif
 
     static constexpr std::array<char, 5> alphabet = {
         'A', 'C', 'G', 'T', 'N'
@@ -93,6 +121,18 @@ protected:
         VL = Traits::maxVL();
         ops.setVL(VL);
         segLen = (s0.length() + VL - 1) / VL;
+
+        prefixScan = (ftype == "prefix-scan-f" || ftype == "prefix");
+
+        setScoring(scoring);
+    }
+
+    //Implemented to MASA: the sequences arrive block by block through alignBlock
+    Farrar(std::string ftype, const ScoringScheme& scoring = ScoringScheme{})
+        : segLen(0), maxScore(0), ftype(ftype)
+    {
+        VL = Traits::maxVL();
+        ops.setVL(VL);
 
         prefixScan = (ftype == "prefix-scan-f" || ftype == "prefix");
 
@@ -123,15 +163,34 @@ protected:
     template <bool PrefixScan>
     VecType processColumns();
 
-    void processPrimaryPass(int profileRow, VecType &vF, VecType &vMax);
+    // diag_h enters lane 0 of the first segment (0 in the standalone run)
+    void processPrimaryPass(int profileRow, ElemType diag_h, VecType &vF, VecType &vMax);
 
-    void propagatePrefixScanF(VecType &vF, VecType &vMax);
+    // top_f is the F entering the first row of the column (0 in the standalone run)
+    void propagatePrefixScanF(VecType &vF, VecType &vMax, ElemType top_f);
 
-    void propagateLazyF(VecType &vF, VecType &vMax);
+    void propagateLazyF(VecType &vF, VecType &vMax, ElemType top_f);
 
     int obtainScore();
 
     void clearData();
+
+#ifdef FARRAR_WITH_MASA
+    score_t alignBlock(
+        const char* query_seg, int q_len,
+        const char* target_seg, int t_len,
+        cell_t* row,
+        cell_t* col,
+        int abs_i, int abs_j
+    );
+
+    void initializeStripedLeftColumn(cell_t* col_buffer, int q_len);
+    void unstripeRightColumnE(cell_t* col_buffer, int q_len);
+    void unstripeRightColumnH(cell_t* col_buffer, int q_len);
+
+    // Build a temporary profile specifically for a block's query segment
+    void buildBlockProfile(const char* query_seg, int q_len);
+#endif
 
     static inline int residueIndex(char c)
     {
