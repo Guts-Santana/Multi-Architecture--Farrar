@@ -20,7 +20,9 @@
 #ifndef EXECUTION_HPP
 #define EXECUTION_HPP
 
+#include <chrono>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include "Farrar.hpp"
 
@@ -32,24 +34,27 @@ void runSelectedBackend(
     const std::string& ftype,
     const std::string& seq0,
     const std::string& seq1,
+    const ScoringScheme& scoring,
     std::ofstream& outFile);
 
 void executeBenchmark(
     const std::string& seq0File,
     const std::string& seq1File,
     const std::string& ftype,
-    const std::string& vectype);
+    const std::string& vectype,
+    const ScoringScheme& scoring);
 
 template <typename Backend>
 void runBenchmark(
     const std::string& seq0,
     const std::string& seq1,
     const std::string& ftype,
+    const ScoringScheme& scoring,
     std::ofstream& outFile)
 {
     auto start = std::chrono::high_resolution_clock::now();
 
-    Farrar<Backend> aligner(seq0, seq1, ftype);
+    Farrar<Backend> aligner(seq0, seq1, ftype, scoring);
 
     int score = aligner.obtainScore();
 

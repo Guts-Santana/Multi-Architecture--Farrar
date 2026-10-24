@@ -53,17 +53,18 @@ void runSelectedBackend(
     const std::string& ftype,
     const std::string& seq0,
     const std::string& seq1,
+    const ScoringScheme& scoring,
     std::ofstream& outFile)
 {
 #if defined(USE_AVX)
 
     if (vectype == "AvxInt16")
         runBenchmark<AvxInt16>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "AvxInt32")
         runBenchmark<AvxInt32>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else
         throw std::invalid_argument(
@@ -73,35 +74,35 @@ void runSelectedBackend(
 
     if (vectype == "RvvInt16M1")
         runBenchmark<RvvInt16M1>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt16M2")
         runBenchmark<RvvInt16M2>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt16M4")
         runBenchmark<RvvInt16M4>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt16M8")
         runBenchmark<RvvInt16M8>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt32M1")
         runBenchmark<RvvInt32M1>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt32M2")
         runBenchmark<RvvInt32M2>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt32M4")
         runBenchmark<RvvInt32M4>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else if (vectype == "RvvInt32M8")
         runBenchmark<RvvInt32M8>(
-            seq0, seq1, ftype, outFile);
+            seq0, seq1, ftype, scoring, outFile);
 
     else
         throw std::invalid_argument(
@@ -119,7 +120,8 @@ void executeBenchmark(
     const std::string& seq0File,
     const std::string& seq1File,
     const std::string& ftype,
-    const std::string& vectype)
+    const std::string& vectype,
+    const ScoringScheme& scoring)
 {
     const std::string seq0 = readFasta(seq0File);
     const std::string seq1 = readFasta(seq1File);
@@ -157,20 +159,29 @@ void executeBenchmark(
         << " - Seq 0 Length: " << seq0.length() << " bp\n"
         << " - Seq 1 Length: " << seq1.length() << " bp\n"
         << " - Strategy Type: " << ftype << "\n"
-        << " - Vector Type: " << vectype << "\n\n";
+        << " - Vector Type: " << vectype << "\n"
+        << " - Scoring: match=" << scoring.match
+        << " mismatch=" << scoring.mismatch
+        << " gap-open=" << scoring.gapOpen
+        << " gap-ext=" << scoring.gapExt << "\n\n";
 
     outFile
         << "Loaded Sequences:\n"
         << " - Seq 0 Length: " << seq0.length() << " bp\n"
         << " - Seq 1 Length: " << seq1.length() << " bp\n"
         << " - Strategy Type: " << ftype << "\n"
-        << " - Vector Type: " << vectype << "\n\n";
+        << " - Vector Type: " << vectype << "\n"
+        << " - Scoring: match=" << scoring.match
+        << " mismatch=" << scoring.mismatch
+        << " gap-open=" << scoring.gapOpen
+        << " gap-ext=" << scoring.gapExt << "\n\n";
 
     runSelectedBackend(
         vectype,
         ftype,
         seq0,
         seq1,
+        scoring,
         outFile);
 
     std::cout

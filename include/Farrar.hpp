@@ -23,12 +23,27 @@
 #include <iostream>
 #include <string>
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <iomanip>
-#include "constants.hpp"
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "Buffer.hpp"
 #include "Backend.hpp"
+
+
+/*
+ * Scores are added to the DP cells, so penalties are negative.
+ * A gap of length k costs gapOpen + (k - 1) * gapExt.
+ */
+struct ScoringScheme {
+    int match    = 1;
+    int mismatch = -3;
+    int gapOpen  = -5;
+    int gapExt   = -2;
+};
 
 
 template <typename Backend>
@@ -38,15 +53,16 @@ protected:
     using Ops        = typename Backend::Ops;
     using Traits     = typename Backend::Traits;
     using BufferType = Buffer<Backend>;
+    using ElemType   = typename Traits::ElemType;
 
 
     private:
         Ops ops;
 
-    int gap_open = GAP_OPEN;
-    int gap_ext = GAP_EXT;
-    int match = MATCH;
-    int mismatch = MISMATCH;
+    int gap_open;
+    int gap_ext;
+    int match;
+    int mismatch;
 
     size_t VL;
     size_t segLen;
@@ -55,40 +71,32 @@ protected:
     std::string s1;
     std::string ftype;
 
-    using PropagateF = void (Farrar<Backend>::*)(VecType&, VecType&);
-    PropagateF propagateF;
+    bool prefixScan;
 
-    BufferType* pvHStore  = nullptr;
-    BufferType* pvHLoad   = nullptr;
-    BufferType* pvE       = nullptr;
-    BufferType* vProfile  = nullptr;
+    // H and E interleaved per segment: H(j) is vector 2*j, E(j) is vector 2*j + 1.
+    BufferType pvHE;
+    // One row of segLen vectors per residue, plus a last row (all mismatch)
+    // used for characters outside the alphabet.
+    BufferType vProfile;
+    std::vector<int> s1Index;
 
     static constexpr std::array<char, 5> alphabet = {
         'A', 'C', 'G', 'T', 'N'
     };
-
-
-    void processPrimaryPass(
-        int* column,
-        VecType& vF,
-        VecType& vMax
-    );
+    static constexpr int invalidRow = alphabet.size();
 
     public:
-    Farrar(std::string s0, std::string s1, std::string ftype) : maxScore(0), s0(s0), s1(s1), ftype(ftype)
+    Farrar(std::string s0, std::string s1, std::string ftype,
+           const ScoringScheme& scoring = ScoringScheme{})
+        : maxScore(0), s0(s0), s1(s1), ftype(ftype)
     {
         VL = Traits::maxVL();
         ops.setVL(VL);
         segLen = (s0.length() + VL - 1) / VL;
 
-        if (ftype == "prefix-scan-f" || ftype == "prefix")
-        {
-            propagateF = &Farrar<Backend>::propagatePrefixScanF;
-        }
-        else
-        {
-            propagateF = &Farrar<Backend>::propagateLazyF;
-        }
+        prefixScan = (ftype == "prefix-scan-f" || ftype == "prefix");
+
+        setScoring(scoring);
     }
 
 
@@ -99,13 +107,23 @@ protected:
 
     void setSequences(std::string s0, std::string s1);
 
+    void setScoring(int match, int mismatch, int gapOpen, int gapExt);
+
+    void setScoring(const ScoringScheme& scoring)
+    {
+        setScoring(scoring.match, scoring.mismatch, scoring.gapOpen, scoring.gapExt);
+    }
+
     void buildProfile();
 
     void initMatrices();
 
-    VecType processColumn(int column);
+    void encodeTarget();
 
-    void processPrimaryPass(int column, VecType &vF, VecType &vMax);
+    template <bool PrefixScan>
+    VecType processColumns();
+
+    void processPrimaryPass(int profileRow, VecType &vF, VecType &vMax);
 
     void propagatePrefixScanF(VecType &vF, VecType &vMax);
 
@@ -115,7 +133,7 @@ protected:
 
     void clearData();
 
-    inline int charToIndex(char c)
+    static inline int residueIndex(char c)
     {
         switch (c)
         {
@@ -140,13 +158,22 @@ protected:
             return 4;
 
         default:
+            return -1;
+        }
+    }
+
+    inline int charToIndex(char c)
+    {
+        int idx = residueIndex(c);
+        if (idx == -1)
+        {
             std::cerr << "Invalid character: "
                       << (int)(unsigned char)c
                       << " (0x"
                       << std::hex << (int)(unsigned char)c
                       << std::dec << ")\n";
-            return -1;
         }
+        return idx;
     }
 
 };

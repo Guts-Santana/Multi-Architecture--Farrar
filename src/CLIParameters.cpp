@@ -36,6 +36,10 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
     static struct option longOptions[] = {
         {"vector",     required_argument, nullptr, 'v'},
         {"f-strategy", required_argument, nullptr, 'f'},
+        {"match",      required_argument, nullptr, 'm'},
+        {"mismatch",   required_argument, nullptr, 'x'},
+        {"gap-open",   required_argument, nullptr, 'o'},
+        {"gap-ext",    required_argument, nullptr, 'e'},
         {"help",       no_argument,       nullptr, 'h'},
         {nullptr,      0,                 nullptr,  0}
     };
@@ -45,7 +49,7 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
     while ((c = getopt_long(
         argc,
         argv,
-        "v:f:h",
+        "v:f:m:x:o:e:h",
         longOptions,
         nullptr
     )) != -1) {
@@ -58,6 +62,22 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
 
         case 'f':
             options.fStrategy = optarg;
+            break;
+
+        case 'm':
+            options.scoring.match = std::stoi(optarg);
+            break;
+
+        case 'x':
+            options.scoring.mismatch = std::stoi(optarg);
+            break;
+
+        case 'o':
+            options.scoring.gapOpen = std::stoi(optarg);
+            break;
+
+        case 'e':
+            options.scoring.gapExt = std::stoi(optarg);
             break;
 
         case 'h':
@@ -99,6 +119,10 @@ void printHelp(const char* program)
         << "Options:\n"
         << "  -v, --vector=BACKEND   Vector backend\n"
         << "  -f, --f-strategy=TYPE  F propagation strategy\n"
+        << "  -m, --match=N          Match score, positive (default: 1)\n"
+        << "  -x, --mismatch=N       Mismatch score, <= 0 (default: -3)\n"
+        << "  -o, --gap-open=N       Gap open score, negative (default: -5)\n"
+        << "  -e, --gap-ext=N        Gap extension score, negative (default: -2)\n"
         << "  -h, --help             Show this help message\n\n"
 
         << "Examples:\n"
@@ -111,5 +135,9 @@ void printHelp(const char* program)
 
         << "  " << program
         << " seq0.fasta seq1.fasta"
-        << " --f-strategy=lazy-f\n";
+        << " --f-strategy=lazy-f\n"
+
+        << "  " << program
+        << " --match=2 --mismatch=-3 --gap-open=-5 --gap-ext=-2"
+        << " seq0.fasta seq1.fasta\n";
 }

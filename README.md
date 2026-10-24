@@ -28,7 +28,6 @@ Multi-Architecture/
 │   ├── Buffer.hpp
 │   ├── CLIParameters.hpp
 │   ├── Farrar.hpp
-│   ├── constants.hpp
 │   ├── execution.hpp
 │   ├── AVX/
 │   │   ├── AvxOps.hpp
@@ -188,6 +187,10 @@ The two FASTA files are the final positional arguments.
 ```text
 -v, --vector=BACKEND
 -f, --f-strategy=TYPE
+-m, --match=N          (default: 1)
+-x, --mismatch=N       (default: -3)
+-o, --gap-open=N       (default: -5)
+-e, --gap-ext=N        (default: -2)
 -h, --help
 ```
 

@@ -20,13 +20,18 @@
 #ifndef BUFFER_HPP
 #define BUFFER_HPP
 
+#include <cstdlib>
 #include <iostream>
 #include <new>
 
 #define ALWAYS_INLINE __attribute__((always_inline)) inline
 
 
-
+/*
+ * Contiguous, 64-byte aligned array of `count` vectors of VL lanes each.
+ * Vector i lives at data() + i * VL, so walking the segments is a single
+ * sequential stream with no pointer chasing.
+ */
 template <typename Backend>
 class Buffer {
     using VecType  = typename Backend::VecType;
@@ -36,101 +41,102 @@ class Buffer {
     private:
         ElemType* lanes = nullptr;
         size_t VL = 0;
-
-        void allocate(size_t vl) {
-            this->VL = vl;
-            if (posix_memalign((void**)&lanes, 64, vl * sizeof(ElemType)) != 0) {
-                lanes = nullptr;
-                throw std::bad_alloc();
-            }
-        }
+        size_t count = 0;
+        size_t capacity = 0;
 
     public:
 
-        ALWAYS_INLINE Buffer(size_t vl, ElemType value = 0){
-            allocate(vl);
-            if (lanes) {
+        Buffer() = default;
 
-                VecType vec = Traits::set(value, VL);
-                Traits::store(lanes, vec, VL);
-            }
-        }
+        Buffer(const Buffer&) = delete;
+        Buffer& operator=(const Buffer&) = delete;
 
-        ALWAYS_INLINE Buffer(const Buffer& other) {
-            allocate(other.VL);
-            if (lanes && other.lanes) {
-
-                VecType vec = Traits::load(other.lanes, other.VL);
-                Traits::store(lanes, vec, other.VL);
-            }
-        }
-
-        ALWAYS_INLINE Buffer(Buffer&& other) noexcept : lanes(other.lanes), VL(other.VL) {
+        ALWAYS_INLINE Buffer(Buffer&& other) noexcept
+            : lanes(other.lanes), VL(other.VL), count(other.count), capacity(other.capacity) {
             other.lanes = nullptr;
-            other.VL = 0;
-        }
-
-        ALWAYS_INLINE ~Buffer(){
-            if (lanes) {
-                free(lanes);
-            }
-        }
-
-        ALWAYS_INLINE Buffer& operator=(const Buffer& other) {
-            if (this != &other) {
-                if (this->VL != other.VL) {
-                    if (lanes){
-                        free(lanes);
-                    }
-                    allocate(other.VL);
-                }
-                if (lanes && other.lanes && VL > 0) {
-                    VecType vec = Traits::load(other.lanes, other.VL);
-                    Traits::store(lanes, vec, other.VL);
-                }
-            }
-            return *this;
+            other.VL = other.count = other.capacity = 0;
         }
 
         ALWAYS_INLINE Buffer& operator=(Buffer&& other) noexcept {
             if (this != &other) {
-                if (lanes) free(lanes);
-                lanes = other.lanes;
-                VL = other.VL;
-                other.lanes = nullptr;
-                other.VL = 0;
+                release();
+                swap(other);
             }
             return *this;
         }
 
-        ALWAYS_INLINE ElemType& operator[](size_t i){
-            return lanes[i];
+        ALWAYS_INLINE ~Buffer(){
+            release();
         }
 
-        ALWAYS_INLINE const ElemType& operator[](size_t i) const{
-            return lanes[i];
+        // Reallocates only when the current allocation is too small.
+        void resize(size_t vectors, size_t vl) {
+            size_t elems = vectors * vl;
+            if (elems > capacity) {
+                release();
+                if (posix_memalign((void**)&lanes, 64, elems * sizeof(ElemType)) != 0) {
+                    lanes = nullptr;
+                    throw std::bad_alloc();
+                }
+                capacity = elems;
+            }
+            VL = vl;
+            count = vectors;
+        }
+
+        void fill(ElemType value) {
+            VecType vec = Traits::set(value, VL);
+            for (size_t i = 0; i < count; ++i) {
+                Traits::store(lanes + i * VL, vec, VL);
+            }
+        }
+
+        void release() {
+            if (lanes) {
+                free(lanes);
+            }
+            lanes = nullptr;
+            VL = count = capacity = 0;
+        }
+
+        ALWAYS_INLINE ElemType& at(size_t vec, size_t lane){
+            return lanes[vec * VL + lane];
+        }
+
+        ALWAYS_INLINE const ElemType& at(size_t vec, size_t lane) const{
+            return lanes[vec * VL + lane];
+        }
+
+        ALWAYS_INLINE ElemType* data(){
+            return lanes;
+        }
+
+        ALWAYS_INLINE const ElemType* data() const{
+            return lanes;
         }
 
         ALWAYS_INLINE size_t size() const{
-            return VL; 
+            return count;
         }
 
         ALWAYS_INLINE void swap(Buffer& other) noexcept{
             std::swap(lanes, other.lanes);
             std::swap(VL, other.VL);
+            std::swap(count, other.count);
+            std::swap(capacity, other.capacity);
         }
 
-        ALWAYS_INLINE VecType load() const{
-            return Traits::load(lanes, VL);
+        ALWAYS_INLINE VecType load(size_t vec) const{
+            return Traits::load(lanes + vec * VL, VL);
         }
 
-        ALWAYS_INLINE void store(VecType vec){
-            Traits::store(lanes, vec, VL);
+        ALWAYS_INLINE void store(size_t vec, VecType v){
+            Traits::store(lanes + vec * VL, v, VL);
         }
 
-        ALWAYS_INLINE void print() const{
+        void print(size_t vec) const{
             for (size_t i = 0; i < VL; ++i) {
-                std::cout << lanes[i] << " ";
+                std::cout << at(vec, i) << " ";
             }
             std::cout << '\n';
         }

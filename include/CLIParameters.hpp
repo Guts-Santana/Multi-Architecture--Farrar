@@ -26,6 +26,7 @@
 #include <stdexcept>
 
 #include "config.h"
+#include "Farrar.hpp"
 
 
 struct CLIParametersOptions {
@@ -33,7 +34,7 @@ struct CLIParametersOptions {
     std::string fStrategy;
     std::string seq0;
     std::string seq1;
-
+    ScoringScheme scoring;
 };
 
 CLIParametersOptions parseArguments(int argc, char* argv[]);

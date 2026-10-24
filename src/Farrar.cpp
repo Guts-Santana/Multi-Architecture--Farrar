@@ -26,49 +26,97 @@ void Farrar<Backend>::setSequences(std::string s0, std::string s1)
     this->s1 = s1;
 }
 
+template <typename Backend>
+void Farrar<Backend>::setScoring(int match, int mismatch, int gapOpen, int gapExt)
+{
+    if (match <= 0)
+        throw std::invalid_argument("match score must be positive");
+    if (mismatch > 0)
+        throw std::invalid_argument("mismatch score must be zero or negative");
+    // A non-negative extension would never decay F, so its propagation would not end.
+    if (gapOpen >= 0 || gapExt >= 0)
+        throw std::invalid_argument("gap open and gap extension must be negative");
+
+    for (int value : {match, mismatch, gapOpen, gapExt})
+    {
+        if (value < std::numeric_limits<ElemType>::min() || value > std::numeric_limits<ElemType>::max())
+            throw std::invalid_argument("score " + std::to_string(value) + " does not fit the vector element type");
+    }
+
+    this->match = match;
+    this->mismatch = mismatch;
+    this->gap_open = gapOpen;
+    this->gap_ext = gapExt;
+}
+
 
 template <typename Backend>
 int Farrar<Backend>::obtainScore()
 {
     initMatrices();
     buildProfile();
-    VecType vMaxBlock = Traits::set(0, VL);
-    for (int i = 0; i < s1.length(); i++)
-    {
-        vMaxBlock = ops.max(vMaxBlock, processColumn(i));
-    }
+    encodeTarget();
+
+    VecType vMaxBlock = prefixScan ? processColumns<true>() : processColumns<false>();
+
     maxScore = static_cast<int>(ops.maxValue(vMaxBlock));
     return maxScore;
 }
 
 template <typename Backend>
+template <bool PrefixScan>
+typename Farrar<Backend>::VecType
+Farrar<Backend>::processColumns()
+{
+    VecType vMaxBlock = Traits::set(0, VL);
+    for (size_t i = 0; i < s1Index.size(); i++)
+    {
+        VecType vF = Traits::set(0, VL);
+        VecType vMax = Traits::set(0, VL);
+
+        processPrimaryPass(s1Index[i], vF, vMax);
+        if constexpr (PrefixScan)
+            propagatePrefixScanF(vF, vMax);
+        else
+            propagateLazyF(vF, vMax);
+
+        vMaxBlock = ops.max(vMaxBlock, vMax);
+    }
+    return vMaxBlock;
+}
+
+template <typename Backend>
+void Farrar<Backend>::encodeTarget()
+{
+    s1Index.resize(s1.length());
+    for (size_t i = 0; i < s1.length(); i++)
+    {
+        int idx = charToIndex(s1[i]);
+        s1Index[i] = (idx == -1) ? invalidRow : idx;
+    }
+}
+
+template <typename Backend>
 void Farrar<Backend>::buildProfile()
 {
+    vProfile.resize((alphabet.size() + 1) * segLen, VL);
+    vProfile.fill(mismatch);
 
-    size_t total_blocks = alphabet.size() * segLen;
-
-    posix_memalign((void **)&vProfile, 64, total_blocks * sizeof(BufferType));
-
-    for (size_t k = 0; k < total_blocks; ++k)
+    // Single sequential pass over s0: lane j of segment i holds s0[j * segLen + i].
+    size_t length = s0.length();
+    for (size_t j = 0; j < VL; j++)
     {
-        new (&vProfile[k]) BufferType(VL, 0);
-    }
-
-    for (char residue : alphabet)
-    {
-        int resIdx = charToIndex(residue);
-        if (resIdx == -1)
-            continue;
-
-        size_t baseOffset = static_cast<size_t>(resIdx) * segLen;
-
         for (size_t i = 0; i < segLen; i++)
         {
-            for (size_t j = 0; j < VL; j++)
-            {
-                size_t idx = j * segLen + i;
-                vProfile[baseOffset + i][j] = (idx < s0.length() && s0[idx] == residue) ? match : mismatch;
-            }
+            size_t idx = j * segLen + i;
+            if (idx >= length)
+                break;
+
+            int resIdx = residueIndex(s0[idx]);
+            if (resIdx == -1)
+                continue;
+
+            vProfile.at(static_cast<size_t>(resIdx) * segLen + i, j) = match;
         }
     }
 }
@@ -78,59 +126,27 @@ void Farrar<Backend>::initMatrices()
 {
     segLen = (s0.length() + VL - 1) / VL;
 
-    clearData();
-
-    posix_memalign((void **)&pvHStore, 64, segLen * sizeof(BufferType));
-    posix_memalign((void **)&pvHLoad, 64, segLen * sizeof(BufferType));
-    posix_memalign((void **)&pvE, 64, segLen * sizeof(BufferType));
-
-    for (size_t j = 0; j < segLen; ++j)
-    {
-        new (&pvHStore[j]) BufferType(VL, 0);
-        new (&pvHLoad[j]) BufferType(VL, 0);
-        new (&pvE[j]) BufferType(VL, 0);
-    }
+    pvHE.resize(2 * segLen, VL);
+    pvHE.fill(0);
 }
 
 template <typename Backend>
-typename Farrar<Backend>::VecType
-Farrar<Backend>::processColumn(int column)
-{
-    VecType vF = Traits::set(0, VL);
-    VecType vMax = Traits::set(0, VL);
-
-    processPrimaryPass(column, vF, vMax);
-    (this->*propagateF)(vF, vMax);
-
-    return vMax;
-}
-
-template <typename Backend>
-void Farrar<Backend>::processPrimaryPass(int column, VecType &vF, VecType &vMax)
+void Farrar<Backend>::processPrimaryPass(int profileRow, VecType &vF, VecType &vMax)
 {
     VecType vE;
-    VecType vProfileTemp;
-    VecType vH = pvHStore[segLen - 1].load();
+    VecType vH = pvHE.load(2 * (segLen - 1));
     vH = ops.shift(vH, 0);
 
-    std::swap(pvHStore, pvHLoad);
+    size_t baseIndex = static_cast<size_t>(profileRow) * segLen;
 
-    int profileIndex = charToIndex(s1[column]);
-    int baseIndex = profileIndex * segLen;
-
-    for (int j = 0; j < segLen; j++)
+    for (size_t j = 0; j < segLen; j++)
     {
-        if (profileIndex == -1)
-        {
-            vH = ops.add(vH, mismatch);
-        }
-        else
-        {
-            vProfileTemp = vProfile[baseIndex + j].load();
-            vH = ops.add(vH, vProfileTemp);
-        }
+        // Previous column's H(j) must be read before it is overwritten.
+        VecType vHPrev = pvHE.load(2 * j);
 
-        vE = pvE[j].load();
+        vH = ops.add(vH, vProfile.load(baseIndex + j));
+
+        vE = pvHE.load(2 * j + 1);
 
         vH = ops.max(vH, vE);
         vH = ops.max(vH, vF);
@@ -138,41 +154,51 @@ void Farrar<Backend>::processPrimaryPass(int column, VecType &vF, VecType &vMax)
 
         vMax = ops.max(vMax, vH);
 
-        pvHStore[j].store(vH);
+        pvHE.store(2 * j, vH);
 
         vH = ops.add(vH, gap_open);
         vE = ops.add(vE, gap_ext);
         vE = ops.max(vE, vH);
-        pvE[j].store(vE);
+        pvHE.store(2 * j + 1, vE);
 
         vF = ops.add(vF, gap_ext);
         vF = ops.max(vF, vH);
-        vH = pvHLoad[j].load();
+        vH = vHPrev;
     }
 }
 
 template <typename Backend>
 void Farrar<Backend>::propagatePrefixScanF(VecType &vF, VecType &vMax)
 {
-    int accumulatedDecay;
+    long long accumulatedDecay;
     vF = ops.shift(vF, 0);
+    // H >= 0, so an F <= 0 can never improve it. Keeping F >= 0 bounds every
+    // value below so the clamped decay cannot wrap around.
+    vF = ops.max(vF, 0);
     VecType vH, vShift;
 
     for (size_t offset = 1; offset < VL; offset <<= 1)
     {
         vShift = ops.slideup(vF, offset);
 
-        accumulatedDecay = offset * gap_ext;
-        vShift = ops.add(vShift, accumulatedDecay);
+        // Lane k + offset starts offset * segLen rows below lane k.
+        accumulatedDecay = static_cast<long long>(offset) * segLen * gap_ext;
+        accumulatedDecay = std::max<long long>(accumulatedDecay, std::numeric_limits<ElemType>::min());
+        vShift = ops.add(vShift, static_cast<ElemType>(accumulatedDecay));
 
         vF = ops.max(vF, vShift);
     }
 
-    for (size_t j = 0; j < segLen; j++)
+    // F decays by gap_ext per segment; once every lane is <= 0 the remaining
+    // segments are unchanged, and stopping there also keeps vF from wrapping.
+    int maxF = static_cast<int>(ops.maxValue(vF));
+    size_t limit = (maxF > 0) ? std::min(segLen, static_cast<size_t>(maxF / -gap_ext) + 1) : 0;
+
+    for (size_t j = 0; j < limit; j++)
     {
-        vH = pvHStore[j].load();
+        vH = pvHE.load(2 * j);
         vH = ops.max(vH, vF);
-        pvHStore[j].store(vH);
+        pvHE.store(2 * j, vH);
         vMax = ops.max(vMax, vH);
         vF = ops.add(vF, gap_ext);
     }
@@ -183,13 +209,13 @@ void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax)
 {
     vF = ops.shift(vF, 0);
     size_t j = 0;
-    VecType vHStore = pvHStore[j].load();
+    VecType vHStore = pvHE.load(0);
     int vFCarry;
     while (ops.anyBiggerElement(vF, ops.add(vHStore, gap_open)))
     {
-        vHStore = pvHStore[j].load();
+        vHStore = pvHE.load(2 * j);
         vHStore = ops.max(vHStore, vF);
-        pvHStore[j].store(vHStore);
+        pvHE.store(2 * j, vHStore);
         vMax = ops.max(vMax, vHStore);
 
         j++;
@@ -207,20 +233,9 @@ void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax)
 template <typename Backend>
 void Farrar<Backend>::clearData()
 {
-    if (pvHStore)
-    {
-        free(pvHStore);
-        pvHStore = nullptr;
-
-        free(pvHLoad);
-        pvHLoad = nullptr;
-
-        free(pvE);
-        pvE = nullptr;
-
-        free(vProfile);
-        vProfile = nullptr;
-    }
+    pvHE.release();
+    vProfile.release();
+    s1Index.clear();
 }
 
 // template class Farrar<vint16m1_t>;

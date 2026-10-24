@@ -11,8 +11,7 @@ farrar_CPPFLAGS = \
 
 farrar_CXXFLAGS = \
     -std=c++17 \
-    -Wall \
-    -O3
+    -Wall
 
 if USE_AVX
 farrar_CXXFLAGS += \
