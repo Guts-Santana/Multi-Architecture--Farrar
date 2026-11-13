@@ -86,7 +86,7 @@ public:
 
     ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
     {
-        return svslide1up_s16(active(), a, carry);
+        return svinsr_n_s16(a, carry);
     }
 
     ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
@@ -175,7 +175,7 @@ public:
 
     ALWAYS_INLINE VecType shift(VecType a, ElemType carry)
     {
-        return svslide1up_s32(active(), a, carry);
+        return svinsr_n_s32(a, carry);
     }
 
     ALWAYS_INLINE VecType slideup(VecType a, size_t offset)
