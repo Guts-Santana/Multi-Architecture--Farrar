@@ -6,8 +6,10 @@ The project currently supports:
 
 * **AVX2**
 * **RISC-V Vector (RVV)**
+* **Arm Scalable Vector Extension (SVE)**
 * 16-bit and 32-bit integer arithmetic
 * Multiple RVV LMUL configurations
+* Runtime SVE vector lengths
 * Multiple `F`-vector propagation strategies
 
 The main design goal is to keep the Farrar implementation independent of SIMD-specific intrinsics while allowing each backend to exploit its target architecture.
@@ -32,9 +34,12 @@ Multi-Architecture/
 │   ├── AVX/
 │   │   ├── AvxOps.hpp
 │   │   └── AvxTraits.hpp
-│   └── RVV/
-│       ├── RvvOps.hpp
-│       └── RvvTraits.hpp
+│   ├── RVV/
+│   │   ├── RvvOps.hpp
+│   │   └── RvvTraits.hpp
+│   └── SVE/
+│       ├── SveOps.hpp
+│       └── SveTraits.hpp
 ├── src/
 │   ├── CLIParameters.cpp
 │   ├── Farrar.cpp
@@ -52,6 +57,7 @@ Multi-Architecture/
 | `Buffer`               | SIMD-aligned storage and vector loads/stores |
 | `AvxOps` / `AvxTraits` | AVX2 implementation                          |
 | `RvvOps` / `RvvTraits` | RVV implementation                           |
+| `SveOps` / `SveTraits` | Arm SVE implementation                       |
 | `CLIParameters`        | Command-line argument parsing                |
 | `execution`            | Sequence loading and backend dispatch        |
 
@@ -62,17 +68,12 @@ Multi-Architecture/
 The implementation separates the Farrar algorithm from SIMD operations:
 
 ```text
-                    Farrar
-                       │
-                       ▼
-                   Backend
-                 ┌─────┴─────┐
-                 │           │
-                AVX2        RVV
-                 │           │
-             Int16/32    Int16/32
-                            │
-                         LMUL 1/2/4/8
+Farrar
+  |
+Backend
+  +-- AVX2: Int16 / Int32
+  +-- RVV: Int16 / Int32, LMUL 1/2/4/8
+  +-- SVE: Int16 / Int32, runtime vector length
 ```
 
 `Farrar` operates through a common set of vector operations instead of directly using architecture-specific intrinsics.
@@ -128,11 +129,25 @@ segLen = (sequenceLength + VL - 1) / VL;
 
 This avoids assuming a fixed hardware VLEN.
 
+### SVE
+
+The SVE backend provides:
+
+```text
+SveInt16
+SveInt32
+```
+
+SVE vector lengths are implementation-dependent. The backend queries the
+runtime lane count for each element width and uses it to determine the Farrar
+segment length, rather than assuming a fixed vector width.
+
 The target architecture is selected when configuring the project:
 
 ```text
 --with-vec-arch=avx
 --with-vec-arch=rvv
+--with-vec-arch=sve
 ```
 
 Only one architecture is enabled in a given build. The concrete vector configuration is then selected through the `--vector` command-line option.
@@ -214,6 +229,16 @@ RVV example:
     Sequences/30k/OQ983940.1.fasta
 ```
 
+SVE example:
+
+```bash
+./farrar \
+    --vector=SveInt16 \
+    --f-strategy=prefix-scan-f \
+    Sequences/30k/NC_045512.2.fasta \
+    Sequences/30k/OQ983940.1.fasta
+```
+
 Display the available options:
 
 ```bash
@@ -275,6 +300,33 @@ make -j
 ```
 
 The resulting executable must be transferred to the RISC-V target.
+
+### SVE
+
+On an AArch64 system with SVE support:
+
+```bash
+./configure --with-vec-arch=sve
+make -j
+```
+
+The build enables:
+
+```text
+-march=armv8.2-a+sve
+```
+
+For cross-compilation, provide an AArch64 SVE-capable compiler:
+
+```bash
+./configure \
+    --with-vec-arch=sve \
+    --host=aarch64-linux-gnu \
+    CXX=aarch64-linux-gnu-g++
+make -j
+```
+
+The resulting executable must be run on an SVE-capable target.
 
 ### Cleaning
 
@@ -362,6 +414,9 @@ Configure AVX2:
 
 Configure RVV:
     ./configure --with-vec-arch=rvv
+
+Configure SVE:
+    ./configure --with-vec-arch=sve
 
 Build:
     make -j

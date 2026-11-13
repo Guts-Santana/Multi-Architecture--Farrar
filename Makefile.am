@@ -24,6 +24,11 @@ farrar_CXXFLAGS += \
     -mabi=lp64d
 endif
 
+if USE_SVE
+farrar_CXXFLAGS += \
+    -march=armv8.2-a+sve
+endif
+
 distclean-local:
 	rm -rf autom4te.cache
 	rm -f aclocal.m4

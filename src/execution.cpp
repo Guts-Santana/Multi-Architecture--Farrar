@@ -108,6 +108,20 @@ void runSelectedBackend(
         throw std::invalid_argument(
             "Invalid RVV backend: " + vectype);
 
+#elif defined(USE_SVE)
+
+    if (vectype == "SveInt16")
+        runBenchmark<SveInt16>(
+            seq0, seq1, ftype, scoring, outFile);
+
+    else if (vectype == "SveInt32")
+        runBenchmark<SveInt32>(
+            seq0, seq1, ftype, scoring, outFile);
+
+    else
+        throw std::invalid_argument(
+            "Invalid SVE backend: " + vectype);
+
 #else
 
     throw std::runtime_error(

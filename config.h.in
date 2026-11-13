@@ -27,5 +27,8 @@
 /* Use RVV backend */
 #undef USE_RVV
 
+/* Use Arm SVE backend */
+#undef USE_SVE
+
 /* Version number of package */
 #undef VERSION
