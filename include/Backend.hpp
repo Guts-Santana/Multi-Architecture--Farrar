@@ -25,15 +25,15 @@
 // Backend selection validation
 // ============================================================
 
-#if defined(USE_RVV) && defined(USE_AVX)
+#if (defined(USE_RVV) + defined(USE_AVX) + defined(USE_SVE)) > 1
 
-#error "USE_RVV and USE_AVX cannot be enabled simultaneously"
+#error "Only one vector backend can be enabled at a time"
 
 #endif
 
-#if !defined(USE_RVV) && !defined(USE_AVX)
+#if !defined(USE_RVV) && !defined(USE_AVX) && !defined(USE_SVE)
 
-#error "No vector backend selected: use --vec-arch=avx or --vec-arch=rvv"
+#error "No vector backend selected: enable USE_AVX, USE_RVV, or USE_SVE"
 
 #endif
 
@@ -107,5 +107,41 @@ struct AvxInt32
 };
 
 #endif // USE_AVX
+
+
+// ============================================================
+// SVE
+// ============================================================
+
+#if defined(USE_SVE)
+
+#include "SVE/SveOps.hpp"
+#include "SVE/SveTraits.hpp"
+
+struct SveInt16
+{
+    using VecType = SveInt16Traits::VecType;
+    using Traits  = SveInt16Traits;
+    using Ops     = Sve16Ops;
+
+    static Ops createOps()
+    {
+        return Ops{};
+    }
+};
+
+struct SveInt32
+{
+    using VecType = SveInt32Traits::VecType;
+    using Traits  = SveInt32Traits;
+    using Ops     = Sve32Ops;
+
+    static Ops createOps()
+    {
+        return Ops{};
+    }
+};
+
+#endif // USE_SVE
 
 #endif // BACKEND_HPP

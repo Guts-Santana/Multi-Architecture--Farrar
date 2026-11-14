@@ -9,7 +9,7 @@ AC_CONFIG_HEADERS([config.h])
 AC_ARG_WITH(
     [vec-arch],
     [AS_HELP_STRING([--with-vec-arch=ARCH],
-        [select vector architecture: avx or rvv])],
+        [select vector architecture: avx, rvv, or sve])],
     [VEC_ARCH="$withval"],
     [VEC_ARCH="avx"]
 )
@@ -19,6 +19,7 @@ case "$VEC_ARCH" in
         AC_MSG_NOTICE([Vector architecture: AVX])
         AM_CONDITIONAL([USE_AVX], [true])
         AM_CONDITIONAL([USE_RVV], [false])
+        AM_CONDITIONAL([USE_SVE], [false])
         AC_DEFINE([USE_AVX], [1], [Use AVX backend])
         ;;
 
@@ -26,13 +27,22 @@ case "$VEC_ARCH" in
         AC_MSG_NOTICE([Vector architecture: RVV])
         AM_CONDITIONAL([USE_AVX], [false])
         AM_CONDITIONAL([USE_RVV], [true])
+        AM_CONDITIONAL([USE_SVE], [false])
         AC_DEFINE([USE_RVV], [1], [Use RVV backend])
+        ;;
+
+    sve)
+        AC_MSG_NOTICE([Vector architecture: SVE])
+        AM_CONDITIONAL([USE_AVX], [false])
+        AM_CONDITIONAL([USE_RVV], [false])
+        AM_CONDITIONAL([USE_SVE], [true])
+        AC_DEFINE([USE_SVE], [1], [Use Arm SVE backend])
         ;;
 
     *)
         AC_MSG_ERROR([
             Invalid vector architecture '$VEC_ARCH'.
-            Use --with-vec-arch=avx or --with-vec-arch=rvv.
+            Use --with-vec-arch=avx, --with-vec-arch=rvv, or --with-vec-arch=sve.
         ])
         ;;
 esac

@@ -27,6 +27,8 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
     options.vector = "RvvInt16M1";
 #elif defined(USE_AVX)
     options.vector = "AvxInt16";
+#elif defined(USE_SVE)
+    options.vector = "SveInt16";
 #else
 #error "No vector backend configured"
 #endif
@@ -131,6 +133,10 @@ void printHelp(const char* program)
 
         << "  " << program
         << " --vector=RvvInt16M4"
+        << " seq0.fasta seq1.fasta\n"
+
+        << "  " << program
+        << " --vector=SveInt16"
         << " seq0.fasta seq1.fasta\n"
 
         << "  " << program

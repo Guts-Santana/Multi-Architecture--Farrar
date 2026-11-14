@@ -466,3 +466,10 @@ template class Farrar<AvxInt16>;
 template class Farrar<AvxInt32>;
 
 #endif
+
+#if defined(USE_SVE)
+
+template class Farrar<SveInt16>;
+template class Farrar<SveInt32>;
+
+#endif
