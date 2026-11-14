@@ -100,10 +100,11 @@ protected:
     static constexpr ElemType LOW = std::numeric_limits<ElemType>::min() / 4;
 
 #ifdef FARRAR_WITH_MASA
-    // MASA boundaries are int and may contain -INF (-999999999): clamp into lane range
-    static ElemType toLane(int v)
+    // MASA boundaries are int and may contain -INF (-999999999): clamp into lane range.
+    // long long so that v - bias cannot overflow when v is -INF.
+    static ElemType toLane(long long v)
     {
-        constexpr int HIGH = std::numeric_limits<ElemType>::max();
+        constexpr long long HIGH = std::numeric_limits<ElemType>::max();
         return static_cast<ElemType>(v < LOW ? LOW : (v > HIGH ? HIGH : v));
     }
 #endif
@@ -176,17 +177,29 @@ protected:
     void clearData();
 
 #ifdef FARRAR_WITH_MASA
+    /*
+     * bias: the lanes hold score - bias. Every boundary value read from MASA
+     * is shifted by -bias before it is clamped into the lane range, and every
+     * value written back to MASA (row, col and the block best) is shifted by
+     * +bias in int, so MASA only ever sees absolute scores. With bias = 0 the
+     * block is aligned exactly as before.
+     *
+     * The caller must guarantee that the shift is exact, i.e. that every H of
+     * the block is >= bias (so the SW floor max(0, .) of the lanes never binds
+     * where the real floor would not) and that score - bias fits in ElemType.
+     */
     score_t alignBlock(
         const char* query_seg, int q_len,
         const char* target_seg, int t_len,
         cell_t* row,
         cell_t* col,
-        int abs_i, int abs_j
+        int abs_i, int abs_j,
+        int bias = 0
     );
 
-    void initializeStripedLeftColumn(cell_t* col_buffer, int q_len);
-    void unstripeRightColumnE(cell_t* col_buffer, int q_len);
-    void unstripeRightColumnH(cell_t* col_buffer, int q_len);
+    void initializeStripedLeftColumn(cell_t* col_buffer, int q_len, int bias);
+    void unstripeRightColumnE(cell_t* col_buffer, int q_len, int bias);
+    void unstripeRightColumnH(cell_t* col_buffer, int q_len, int bias);
 
     // Build a temporary profile specifically for a block's query segment
     void buildBlockProfile(const char* query_seg, int q_len);

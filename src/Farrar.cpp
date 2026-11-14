@@ -276,7 +276,7 @@ void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax, ElemType top_f)
 #ifdef FARRAR_WITH_MASA
 
 template <typename Backend>
-void Farrar<Backend>::initializeStripedLeftColumn(cell_t* col_buffer, int q_len)
+void Farrar<Backend>::initializeStripedLeftColumn(cell_t* col_buffer, int q_len, int bias)
 {
     // 1. Reset all lanes (important for the padding area at the end of the query)
     for (size_t idx = 0; idx < segLen; ++idx)
@@ -293,30 +293,30 @@ void Farrar<Backend>::initializeStripedLeftColumn(cell_t* col_buffer, int q_len)
         size_t lane = i / segLen;
         size_t idx  = i % segLen;
 
-        int h = toLane(col_buffer[i + 1].h);
-        int e = toLane(col_buffer[i + 1].e);
+        int h = toLane(static_cast<long long>(col_buffer[i + 1].h) - bias);
+        int e = toLane(static_cast<long long>(col_buffer[i + 1].e) - bias);
         pvHE.at(2 * idx, lane)     = h;
         pvHE.at(2 * idx + 1, lane) = toLane(std::max(h + gap_open, e + gap_ext));
     }
 }
 
 template <typename Backend>
-void Farrar<Backend>::unstripeRightColumnE(cell_t* col_buffer, int q_len)
+void Farrar<Backend>::unstripeRightColumnE(cell_t* col_buffer, int q_len, int bias)
 {
     // Must be called right before the last column is processed: at that point
     // E holds exactly E[i][j1-1], which is what MASA expects in col[].e
     for (int i = 0; i < q_len; ++i)
     {
-        col_buffer[i + 1].e = pvHE.at(2 * (i % segLen) + 1, i / segLen);
+        col_buffer[i + 1].e = static_cast<int>(pvHE.at(2 * (i % segLen) + 1, i / segLen)) + bias;
     }
 }
 
 template <typename Backend>
-void Farrar<Backend>::unstripeRightColumnH(cell_t* col_buffer, int q_len)
+void Farrar<Backend>::unstripeRightColumnH(cell_t* col_buffer, int q_len, int bias)
 {
     for (int i = 0; i < q_len; ++i)
     {
-        col_buffer[i + 1].h = pvHE.at(2 * (i % segLen), i / segLen);
+        col_buffer[i + 1].h = static_cast<int>(pvHE.at(2 * (i % segLen), i / segLen)) + bias;
     }
 }
 
@@ -348,7 +348,8 @@ score_t Farrar<Backend>::alignBlock(
     const char* target_seg, int t_len,
     cell_t* row,
     cell_t* col,
-    int abs_i, int abs_j)
+    int abs_i, int abs_j,
+    int bias)
 {
     blockMode = true;
 
@@ -358,7 +359,7 @@ score_t Farrar<Backend>::alignBlock(
     pvF.resize(segLen, VL);
 
     buildBlockProfile(query_seg, q_len);
-    initializeStripedLeftColumn(col, q_len);
+    initializeStripedLeftColumn(col, q_len, bias);
 
     score_t block_best;
     block_best.score = -INF;
@@ -369,14 +370,15 @@ score_t Farrar<Backend>::alignBlock(
     size_t last_idx  = (q_len - 1) % segLen;
 
     // H[i0-1][j-1]: diagonal of the first row of column j
-    ElemType diag_h = toLane(col[0].h);
+    ElemType diag_h = toLane(static_cast<long long>(col[0].h) - bias);
     // H[i0-1][j1-1] is the diagonal cell of the right neighbour block
+    // (read before the row is overwritten: it is already absolute, no bias)
     int corner_h = row[t_len - 1].h;
 
     for (int j = 0; j < t_len; ++j)
     {
-        int top_h = toLane(row[j].h);
-        int top_f = toLane(row[j].f);
+        int top_h = toLane(static_cast<long long>(row[j].h) - bias);
+        int top_f = toLane(static_cast<long long>(row[j].f) - bias);
         // F entering the first row: F[i0][j] = max(H[i0-1][j] + open, F[i0-1][j] + ext)
         ElemType first_f = toLane(std::max(top_h + gap_open, top_f + gap_ext));
 
@@ -385,7 +387,7 @@ score_t Farrar<Backend>::alignBlock(
 
         // E currently holds E[*][j1-1]: this is MASA's right column E
         if (j == t_len - 1)
-            unstripeRightColumnE(col, q_len);
+            unstripeRightColumnE(col, q_len, bias);
 
         int idx = charToIndex(target_seg[j]);
         processPrimaryPass((idx == -1) ? invalidRow : idx, diag_h, vF, vMax);
@@ -396,14 +398,16 @@ score_t Farrar<Backend>::alignBlock(
 
         diag_h = top_h;
 
-        // Overwrite row boundary for MASA (last row of the block)
-        row[j].h = pvHE.at(2 * last_idx, last_lane);
-        row[j].f = pvF.at(last_idx, last_lane);
+        // Overwrite row boundary for MASA (last row of the block), back in
+        // absolute scores: the + bias is done in int, never in the lanes
+        row[j].h = static_cast<int>(pvHE.at(2 * last_idx, last_lane)) + bias;
+        row[j].f = static_cast<int>(pvF.at(last_idx, last_lane)) + bias;
 
-        int col_max = ops.maxValue(vMax);
-        if (col_max > block_best.score)
+        // col_max is relative (lanes); block_best is absolute
+        int col_max = static_cast<int>(ops.maxValue(vMax));
+        if (col_max + bias > block_best.score)
         {
-            block_best.score = col_max;
+            block_best.score = col_max + bias;
             block_best.j = abs_j + j;
             // Locate the row of the maximum (first one, padding rows excluded)
             for (int i = 0; i < q_len; ++i)
@@ -418,7 +422,7 @@ score_t Farrar<Backend>::alignBlock(
     }
 
     // Overwrite column boundary for MASA
-    unstripeRightColumnH(col, q_len);
+    unstripeRightColumnH(col, q_len, bias);
     col[0].h = corner_h;
 
     blockMode = false;
