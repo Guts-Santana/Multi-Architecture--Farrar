@@ -237,14 +237,14 @@ protected:
     inline int charToIndex(char c)
     {
         int idx = residueIndex(c);
-        if (idx == -1)
-        {
-            std::cerr << "Invalid character: "
-                      << (int)(unsigned char)c
-                      << " (0x"
-                      << std::hex << (int)(unsigned char)c
-                      << std::dec << ")\n";
-        }
+        // if (idx == -1)
+        // {
+        //     std::cerr << "Invalid character: "
+        //               << (int)(unsigned char)c
+        //               << " (0x"
+        //               << std::hex << (int)(unsigned char)c
+        //               << std::dec << ")\n";
+        // }
         return idx;
     }
 
