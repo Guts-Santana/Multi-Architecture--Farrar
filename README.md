@@ -156,7 +156,22 @@ Only one architecture is enabled in a given build. The concrete vector configura
 
 ## 3. Farrar Algorithm
 
-The implementation uses the striped formulation of Smith-Waterman.
+The implementation uses the striped formulation of Smith-Waterman (local
+alignment). The same kernel also runs Needleman-Wunsch (global alignment),
+selected with `--alignment=nw`:
+
+| | Smith-Waterman (`sw`, default) | Needleman-Wunsch (`nw`) |
+|---|---|---|
+| Floor of `H` | `0` | none |
+| First row / column | `0` | a gap: `H(i,-1) = H(-1,i) = gapOpen + i * gapExt` |
+| Score | best cell | last cell `H(n-1, m-1)` |
+
+Only the floor of `H` changes inside the kernel. NW scores go far below zero,
+so the lanes hold `H - b`, where `b` is a lower bound of every cell of the
+matrix (a path from the corner scored with the worst score at each step). The
+run is exact when `match * min(n, m) - b` fits the vector type; otherwise
+`farrar` stops with an error and suggests an `Int32` backend. In practice an
+`Int16` NW run is limited to sequences of a few thousand bases.
 
 The main data structures are:
 
@@ -206,6 +221,7 @@ The two FASTA files are the final positional arguments.
 -x, --mismatch=N       (default: -3)
 -o, --gap-open=N       (default: -5)
 -e, --gap-ext=N        (default: -2)
+-a, --alignment=TYPE   sw (local) or nw (global) (default: sw)
 -h, --help
 ```
 
@@ -238,6 +254,19 @@ SVE example:
     Sequences/30k/NC_045512.2.fasta \
     Sequences/30k/OQ983940.1.fasta
 ```
+
+Global alignment (Needleman-Wunsch):
+
+```bash
+./farrar \
+    --alignment=nw \
+    --vector=AvxInt32 \
+    Sequences/30k/NC_045512.2.fasta \
+    Sequences/30k/OQ983940.1.fasta
+```
+
+The NW results are saved with a `_nw` suffix, so they do not overwrite the SW
+ones.
 
 Display the available options:
 

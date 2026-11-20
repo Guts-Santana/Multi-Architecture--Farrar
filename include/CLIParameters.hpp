@@ -35,6 +35,7 @@ struct CLIParametersOptions {
     std::string seq0;
     std::string seq1;
     ScoringScheme scoring;
+    AlignmentType alignment = AlignmentType::Local;
 };
 
 CLIParametersOptions parseArguments(int argc, char* argv[]);

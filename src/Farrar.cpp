@@ -50,16 +50,52 @@ void Farrar<Backend>::setScoring(int match, int mismatch, int gapOpen, int gapEx
 }
 
 
+/*
+ * SW: the score is the best cell.
+ * NW: the score is the last cell H(n-1, m-1). NW scores go far below 0, so the
+ * lanes hold H - globalBias, with globalBias a lower bound of every H of the
+ * matrix (its boundary included). Every H is also <= match * min(n, m), so the
+ * run is exact when match * min(n, m) - globalBias fits the vector type.
+ */
 template <typename Backend>
 int Farrar<Backend>::obtainScore()
 {
+    globalBias = 0;
+    if (isGlobal())
+    {
+        const long long n = static_cast<long long>(s0.length());
+        const long long m = static_cast<long long>(s1.length());
+        if (n == 0 || m == 0)
+            throw std::invalid_argument("NW needs two non-empty sequences");
+
+        globalBias = std::min({0LL,
+                               cornerLowerBound(0, n, m, getScoring()),
+                               boundaryH(std::max(n, m) - 1)});
+
+        constexpr long long LIMIT = std::numeric_limits<ElemType>::max() - 128;
+        const long long range = static_cast<long long>(match) * std::min(n, m) - globalBias;
+        if (range > LIMIT)
+            throw std::overflow_error(
+                "NW scores of these sequences span " + std::to_string(range) +
+                ", more than the " + std::to_string(LIMIT) +
+                " this vector type holds: use an Int32 backend");
+    }
+
     initMatrices();
     buildProfile();
     encodeTarget();
 
     VecType vMaxBlock = prefixScan ? processColumns<true>() : processColumns<false>();
 
-    maxScore = static_cast<int>(ops.maxValue(vMaxBlock));
+    if (isGlobal())
+    {
+        const size_t last = s0.length() - 1;
+        maxScore = static_cast<int>(pvHE.at(2 * (last % segLen), last / segLen) + globalBias);
+    }
+    else
+    {
+        maxScore = static_cast<int>(ops.maxValue(vMaxBlock));
+    }
     return maxScore;
 }
 
@@ -68,17 +104,28 @@ template <bool PrefixScan>
 typename Farrar<Backend>::VecType
 Farrar<Backend>::processColumns()
 {
-    VecType vMaxBlock = Traits::set(0, VL);
+    const bool global = isGlobal();
+    VecType vMaxBlock = Traits::set(hFloor, VL);
     for (size_t i = 0; i < s1Index.size(); i++)
     {
+        ElemType diag_h = 0;
+        ElemType top_f = 0;
         VecType vF = Traits::set(0, VL);
-        VecType vMax = Traits::set(0, VL);
+        if (global)
+        {
+            // Top boundary: H(-1, i-1) is the diagonal of row 0, and the F
+            // entering row 0 opens a gap from H(-1, i) (F(-1, i) is -INF)
+            diag_h = toLane(boundaryH(static_cast<long long>(i) - 1) - globalBias);
+            top_f  = toLane(boundaryH(static_cast<long long>(i)) + gap_open - globalBias);
+            vF = Traits::set(LOW, VL);
+        }
+        VecType vMax = Traits::set(hFloor, VL);
 
-        processPrimaryPass(s1Index[i], 0, vF, vMax);
+        processPrimaryPass(s1Index[i], diag_h, vF, vMax);
         if constexpr (PrefixScan)
-            propagatePrefixScanF(vF, vMax, 0);
+            propagatePrefixScanF(vF, vMax, top_f);
         else
-            propagateLazyF(vF, vMax, 0);
+            propagateLazyF(vF, vMax, top_f);
 
         vMaxBlock = ops.max(vMaxBlock, vMax);
     }
@@ -127,7 +174,22 @@ void Farrar<Backend>::initMatrices()
     segLen = (s0.length() + VL - 1) / VL;
 
     pvHE.resize(2 * segLen, VL);
-    pvHE.fill(0);
+    if (!isGlobal())
+    {
+        pvHE.fill(0);
+        return;
+    }
+
+    // NW: column -1 holds H(i, -1) = a gap of i + 1 cells, and the E prepared
+    // for column 0 opens a gap from it (E(i, -1) is -INF). Padding rows
+    // (i >= n) start at LOW: they never feed a real row.
+    pvHE.fill(LOW);
+    for (size_t i = 0; i < s0.length(); ++i)
+    {
+        const long long h = boundaryH(static_cast<long long>(i)) - globalBias;
+        pvHE.at(2 * (i % segLen), i / segLen)     = toLane(h);
+        pvHE.at(2 * (i % segLen) + 1, i / segLen) = toLane(h + gap_open);
+    }
 }
 
 template <typename Backend>
@@ -136,6 +198,8 @@ void Farrar<Backend>::processPrimaryPass(int profileRow, ElemType diag_h, VecTyp
     VecType vE;
     VecType vH = pvHE.load(2 * (segLen - 1));
     vH = ops.shift(vH, diag_h);
+    // SW: 0; NW: LOW, which never binds when the caller's bias is valid
+    const VecType vFloor = Traits::set(hFloor, VL);
 
     size_t baseIndex = static_cast<size_t>(profileRow) * segLen;
 
@@ -154,7 +218,7 @@ void Farrar<Backend>::processPrimaryPass(int profileRow, ElemType diag_h, VecTyp
 
         vH = ops.max(vH, vE);
         vH = ops.max(vH, vF);
-        vH = ops.max(vH, 0);
+        vH = ops.max(vH, vFloor);
 
         vMax = ops.max(vMax, vH);
 
@@ -176,10 +240,12 @@ void Farrar<Backend>::propagatePrefixScanF(VecType &vF, VecType &vMax, ElemType 
 {
     long long accumulatedDecay;
     vF = ops.shift(vF, top_f);
-    // H >= 0, so an F <= 0 can never improve it. Keeping F >= 0 bounds every
-    // value below so the clamped decay cannot wrap around. In block mode F
-    // leaves the block through MASA's row, so its true (negative) value is kept.
-    if (!blockMode)
+    // Standalone SW: H >= 0, so an F <= 0 can never improve it. Keeping F >= 0
+    // bounds every value below so the clamped decay cannot wrap around. In block
+    // mode F leaves the block through MASA's row, and in NW H has no floor, so
+    // the true (negative) F is kept and the values are bounded by LOW instead.
+    const bool exactF = blockMode || isGlobal();
+    if (!exactF)
         vF = ops.max(vF, 0);
     VecType vH, vShift;
 
@@ -190,10 +256,10 @@ void Farrar<Backend>::propagatePrefixScanF(VecType &vF, VecType &vMax, ElemType 
         // Lane k + offset starts offset * segLen rows below lane k.
         accumulatedDecay = static_cast<long long>(offset) * segLen * gap_ext;
         accumulatedDecay = std::max<long long>(accumulatedDecay,
-            blockMode ? LOW : std::numeric_limits<ElemType>::min());
+            exactF ? LOW : std::numeric_limits<ElemType>::min());
         vShift = ops.add(vShift, static_cast<ElemType>(accumulatedDecay));
 
-        if (blockMode)
+        if (exactF)
         {
             // AVX slideup fills lanes < offset with 0 (a fake F of 0): push them to LOW
             VecType vFillMask = ops.add(ops.slideup(Traits::set(-LOW, VL), offset), LOW);
@@ -205,9 +271,10 @@ void Farrar<Backend>::propagatePrefixScanF(VecType &vF, VecType &vMax, ElemType 
 
     // F decays by gap_ext per segment; once every lane is <= 0 the remaining
     // segments are unchanged, and stopping there also keeps vF from wrapping.
-    // Block mode needs the corrected F and E of every segment, so it sweeps them all.
+    // Block mode needs the corrected F and E of every segment, and in NW an
+    // F <= 0 can still improve H, so both sweep them all.
     size_t limit = segLen;
-    if (!blockMode)
+    if (!exactF)
     {
         int maxF = static_cast<int>(ops.maxValue(vF));
         limit = (maxF > 0) ? std::min(segLen, static_cast<size_t>(maxF / -gap_ext) + 1) : 0;
@@ -256,12 +323,13 @@ void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax, ElemType top_f)
 
         if (j >= segLen)
         {
-            if (blockMode)
+            if (blockMode || isGlobal())
             {
                 // Lane k continues into lane k+1; nothing flows from the bottom row back into row 0
                 vF = ops.shift(vF, LOW);
                 j = 0;
-                pvF.store(0, ops.max(pvF.load(0), vF));
+                if (blockMode)
+                    pvF.store(0, ops.max(pvF.load(0), vF));
             }
             else
             {
@@ -278,10 +346,12 @@ void Farrar<Backend>::propagateLazyF(VecType &vF, VecType &vMax, ElemType top_f)
 template <typename Backend>
 void Farrar<Backend>::initializeStripedLeftColumn(cell_t* col_buffer, int q_len, int bias)
 {
-    // 1. Reset all lanes (important for the padding area at the end of the query)
+    // 1. Reset all lanes (important for the padding area at the end of the query).
+    //    Padding H starts at the floor: in NW a padding H of 0 (= bias) could
+    //    otherwise beat every real cell of the block and become its best.
     for (size_t idx = 0; idx < segLen; ++idx)
     {
-        pvHE.store(2 * idx, Traits::set(0, VL));
+        pvHE.store(2 * idx, Traits::set(hFloor, VL));
         pvHE.store(2 * idx + 1, Traits::set(LOW, VL));
     }
 
@@ -349,9 +419,11 @@ score_t Farrar<Backend>::alignBlock(
     cell_t* row,
     cell_t* col,
     int abs_i, int abs_j,
-    int bias)
+    int bias,
+    AlignmentType type)
 {
     blockMode = true;
+    setAlignmentType(type);
 
     // Buffer::resize only reallocates when the block is larger than the last one
     segLen = (q_len + VL - 1) / VL;
@@ -383,7 +455,7 @@ score_t Farrar<Backend>::alignBlock(
         ElemType first_f = toLane(std::max(top_h + gap_open, top_f + gap_ext));
 
         VecType vF = Traits::set(LOW, VL);
-        VecType vMax = Traits::set(0, VL);
+        VecType vMax = Traits::set(hFloor, VL);
 
         // E currently holds E[*][j1-1]: this is MASA's right column E
         if (j == t_len - 1)
