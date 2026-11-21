@@ -35,6 +35,7 @@ void runSelectedBackend(
     const std::string& seq0,
     const std::string& seq1,
     const ScoringScheme& scoring,
+    AlignmentType alignment,
     std::ofstream& outFile);
 
 void executeBenchmark(
@@ -42,7 +43,8 @@ void executeBenchmark(
     const std::string& seq1File,
     const std::string& ftype,
     const std::string& vectype,
-    const ScoringScheme& scoring);
+    const ScoringScheme& scoring,
+    AlignmentType alignment);
 
 template <typename Backend>
 void runBenchmark(
@@ -50,11 +52,12 @@ void runBenchmark(
     const std::string& seq1,
     const std::string& ftype,
     const ScoringScheme& scoring,
+    AlignmentType alignment,
     std::ofstream& outFile)
 {
     auto start = std::chrono::high_resolution_clock::now();
 
-    Farrar<Backend> aligner(seq0, seq1, ftype, scoring);
+    Farrar<Backend> aligner(seq0, seq1, ftype, scoring, alignment);
 
     int score = aligner.obtainScore();
 

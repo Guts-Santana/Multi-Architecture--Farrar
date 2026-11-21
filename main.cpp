@@ -36,7 +36,8 @@ int main(int argc, char* argv[])
             options.seq1,
             options.fStrategy,
             options.vector,
-            options.scoring
+            options.scoring,
+            options.alignment
         );
     }
 

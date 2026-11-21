@@ -42,6 +42,7 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
         {"mismatch",   required_argument, nullptr, 'x'},
         {"gap-open",   required_argument, nullptr, 'o'},
         {"gap-ext",    required_argument, nullptr, 'e'},
+        {"alignment",  required_argument, nullptr, 'a'},
         {"help",       no_argument,       nullptr, 'h'},
         {nullptr,      0,                 nullptr,  0}
     };
@@ -51,7 +52,7 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
     while ((c = getopt_long(
         argc,
         argv,
-        "v:f:m:x:o:e:h",
+        "v:f:m:x:o:e:a:h",
         longOptions,
         nullptr
     )) != -1) {
@@ -80,6 +81,10 @@ CLIParametersOptions parseArguments(int argc, char* argv[])
 
         case 'e':
             options.scoring.gapExt = std::stoi(optarg);
+            break;
+
+        case 'a':
+            options.alignment = parseAlignmentType(optarg);
             break;
 
         case 'h':
@@ -125,6 +130,8 @@ void printHelp(const char* program)
         << "  -x, --mismatch=N       Mismatch score, <= 0 (default: -3)\n"
         << "  -o, --gap-open=N       Gap open score, negative (default: -5)\n"
         << "  -e, --gap-ext=N        Gap extension score, negative (default: -2)\n"
+        << "  -a, --alignment=TYPE   sw (local, Smith-Waterman) or nw (global,\n"
+        << "                         Needleman-Wunsch) (default: sw)\n"
         << "  -h, --help             Show this help message\n\n"
 
         << "Examples:\n"
@@ -145,5 +152,9 @@ void printHelp(const char* program)
 
         << "  " << program
         << " --match=2 --mismatch=-3 --gap-open=-5 --gap-ext=-2"
+        << " seq0.fasta seq1.fasta\n"
+
+        << "  " << program
+        << " --alignment=nw --vector=AvxInt32"
         << " seq0.fasta seq1.fasta\n";
 }

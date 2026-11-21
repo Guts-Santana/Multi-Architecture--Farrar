@@ -50,6 +50,54 @@ struct ScoringScheme {
     int gapExt   = -2;
 };
 
+/*
+ * Local = Smith-Waterman (H >= 0, the score is the best cell).
+ * Global = Needleman-Wunsch (no floor, the score is the last cell).
+ * Both use the same kernel: only the floor of H changes (0 or LOW).
+ */
+enum class AlignmentType { Local, Global };
+
+inline AlignmentType parseAlignmentType(const std::string& name)
+{
+    if (name == "sw" || name == "local" || name == "smith-waterman")
+        return AlignmentType::Local;
+    if (name == "nw" || name == "global" || name == "needleman-wunsch")
+        return AlignmentType::Global;
+    throw std::invalid_argument("Invalid alignment type: " + name + " (use sw or nw)");
+}
+
+inline const char* alignmentTypeName(AlignmentType type)
+{
+    return type == AlignmentType::Global ? "nw" : "sw";
+}
+
+/*
+ * Lower bound of every H of an R x C block (R, C >= 1), from its corner
+ * H(i0-1, j0-1) alone: H is the max over all paths, so any path from the
+ * corner, scored as if every diagonal step were the worst one (x), is a floor.
+ *   diag: min(i,j) diagonal steps, then one gap of |i-j| cells (worst cell:
+ *         k = min(R,C) steps or k = 1; gapOpen is charged even for |i-j| = 0)
+ *   gaps: one diagonal step, a gap along row 1, a gap down the column (R, C >= 2)
+ * The higher of the two is returned. It holds for both recurrences: SW callers
+ * add their own max(0, .).
+ */
+inline long long cornerLowerBound(long long corner, long long R, long long C,
+                                  const ScoringScheme& scoring)
+{
+    const long long x  = std::min(scoring.mismatch, scoring.match);
+    const long long go = scoring.gapOpen;
+    const long long ge = scoring.gapExt;
+    const long long minRC = std::min(R, C);
+    const long long maxRC = std::max(R, C);
+
+    long long lower = corner + go + std::min(
+            x * minRC + std::max(maxRC - minRC - 1, 0LL) * ge,
+            x + (maxRC - 2) * ge);
+    if (R >= 2 && C >= 2)
+        lower = std::max(lower, corner + x + 2 * go + (R + C - 4) * ge);
+    return lower;
+}
+
 
 template <typename Backend>
 class Farrar {
@@ -78,6 +126,13 @@ protected:
 
     bool prefixScan;
 
+    // SW or NW, and the floor of H in the lanes that goes with it (0 or LOW)
+    AlignmentType alignment = AlignmentType::Local;
+    ElemType hFloor = 0;
+
+    // Standalone NW: the lanes hold score - globalBias (see obtainScore)
+    long long globalBias = 0;
+
     // H and E interleaved per segment: H(j) is vector 2*j, E(j) is vector 2*j + 1.
     BufferType pvHE;
     // One row of segLen vectors per residue, plus a last row (all mismatch)
@@ -99,14 +154,21 @@ protected:
     // "Minus infinity" that still leaves headroom for the non-saturating adds
     static constexpr ElemType LOW = std::numeric_limits<ElemType>::min() / 4;
 
-#ifdef FARRAR_WITH_MASA
-    // MASA boundaries are int and may contain -INF (-999999999): clamp into lane range
-    static ElemType toLane(int v)
+    // Clamp a score into the lane range. MASA boundaries are int and may contain
+    // -INF (-999999999); long long so that v - bias cannot overflow.
+    static ElemType toLane(long long v)
     {
-        constexpr int HIGH = std::numeric_limits<ElemType>::max();
+        constexpr long long HIGH = std::numeric_limits<ElemType>::max();
         return static_cast<ElemType>(v < LOW ? LOW : (v > HIGH ? HIGH : v));
     }
-#endif
+
+    // Standalone NW boundary: H(-1, k) = H(k, -1) = a gap of k + 1 cells, H(-1,-1) = 0
+    long long boundaryH(long long k) const
+    {
+        return (k < 0) ? 0 : gap_open + k * gap_ext;
+    }
+
+    bool isGlobal() const { return alignment == AlignmentType::Global; }
 
     static constexpr std::array<char, 5> alphabet = {
         'A', 'C', 'G', 'T', 'N'
@@ -115,7 +177,8 @@ protected:
 
     public:
     Farrar(std::string s0, std::string s1, std::string ftype,
-           const ScoringScheme& scoring = ScoringScheme{})
+           const ScoringScheme& scoring = ScoringScheme{},
+           AlignmentType alignment = AlignmentType::Local)
         : maxScore(0), s0(s0), s1(s1), ftype(ftype)
     {
         VL = Traits::maxVL();
@@ -125,6 +188,7 @@ protected:
         prefixScan = (ftype == "prefix-scan-f" || ftype == "prefix");
 
         setScoring(scoring);
+        setAlignmentType(alignment);
     }
 
     //Implemented to MASA: the sequences arrive block by block through alignBlock
@@ -154,6 +218,33 @@ protected:
         setScoring(scoring.match, scoring.mismatch, scoring.gapOpen, scoring.gapExt);
     }
 
+    ScoringScheme getScoring() const
+    {
+        ScoringScheme scoring;
+        scoring.match = match;
+        scoring.mismatch = mismatch;
+        scoring.gapOpen = gap_open;
+        scoring.gapExt = gap_ext;
+        return scoring;
+    }
+
+    void setAlignmentType(AlignmentType type)
+    {
+        alignment = type;
+        // NW has no floor: LOW only keeps the non-saturating adds from wrapping
+        hFloor = (type == AlignmentType::Global) ? LOW : 0;
+    }
+
+    AlignmentType getAlignmentType() const { return alignment; }
+
+    // F propagation strategy: prefix-scan-f (or prefix) / lazy-f. MASA switches it
+    // per block, since lazy-f suits SW and prefix-scan-f suits NW.
+    void setFStrategy(const std::string& strategy)
+    {
+        ftype = strategy;
+        prefixScan = (strategy == "prefix-scan-f" || strategy == "prefix");
+    }
+
     void buildProfile();
 
     void initMatrices();
@@ -163,10 +254,10 @@ protected:
     template <bool PrefixScan>
     VecType processColumns();
 
-    // diag_h enters lane 0 of the first segment (0 in the standalone run)
+    // diag_h enters lane 0 of the first segment (0 in the standalone SW run)
     void processPrimaryPass(int profileRow, ElemType diag_h, VecType &vF, VecType &vMax);
 
-    // top_f is the F entering the first row of the column (0 in the standalone run)
+    // top_f is the F entering the first row of the column (0 in the standalone SW run)
     void propagatePrefixScanF(VecType &vF, VecType &vMax, ElemType top_f);
 
     void propagateLazyF(VecType &vF, VecType &vMax, ElemType top_f);
@@ -176,17 +267,37 @@ protected:
     void clearData();
 
 #ifdef FARRAR_WITH_MASA
+    /*
+     * bias: the lanes hold score - bias. Every boundary value read from MASA
+     * is shifted by -bias before it is clamped into the lane range, and every
+     * value written back to MASA (row, col and the block best) is shifted by
+     * +bias in int, so MASA only ever sees absolute scores. With bias = 0 the
+     * block is aligned exactly as before.
+     *
+     * The caller must guarantee that the shift is exact:
+     *   SW: every H of the block is >= bias (so the SW floor max(0, .) of the
+     *       lanes never binds where the real floor would not);
+     *   NW: every H of the block is >= bias + LOW (the lanes have no real floor,
+     *       LOW only stops the adds from wrapping), e.g. bias = cornerLowerBound;
+     * and, for both, that score - bias fits in ElemType.
+     *
+     * type selects the recurrence: Local (SW, MASA's SMITH_WATERMAN) or
+     * Global (NW, MASA's NEEDLEMAN_WUNSCH). The returned best is the max H of
+     * the block in both cases, as MASA's CPUBlockProcessor does.
+     */
     score_t alignBlock(
         const char* query_seg, int q_len,
         const char* target_seg, int t_len,
         cell_t* row,
         cell_t* col,
-        int abs_i, int abs_j
+        int abs_i, int abs_j,
+        int bias = 0,
+        AlignmentType type = AlignmentType::Local
     );
 
-    void initializeStripedLeftColumn(cell_t* col_buffer, int q_len);
-    void unstripeRightColumnE(cell_t* col_buffer, int q_len);
-    void unstripeRightColumnH(cell_t* col_buffer, int q_len);
+    void initializeStripedLeftColumn(cell_t* col_buffer, int q_len, int bias);
+    void unstripeRightColumnE(cell_t* col_buffer, int q_len, int bias);
+    void unstripeRightColumnH(cell_t* col_buffer, int q_len, int bias);
 
     // Build a temporary profile specifically for a block's query segment
     void buildBlockProfile(const char* query_seg, int q_len);
@@ -224,14 +335,14 @@ protected:
     inline int charToIndex(char c)
     {
         int idx = residueIndex(c);
-        if (idx == -1)
-        {
-            std::cerr << "Invalid character: "
-                      << (int)(unsigned char)c
-                      << " (0x"
-                      << std::hex << (int)(unsigned char)c
-                      << std::dec << ")\n";
-        }
+        // if (idx == -1)
+        // {
+        //     std::cerr << "Invalid character: "
+        //               << (int)(unsigned char)c
+        //               << " (0x"
+        //               << std::hex << (int)(unsigned char)c
+        //               << std::dec << ")\n";
+        // }
         return idx;
     }
 
